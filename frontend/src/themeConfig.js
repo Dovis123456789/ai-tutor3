@@ -1,0 +1,26 @@
+export const themes = {
+  rose: {
+    name: '黑白极简',
+    bg: 'bg-white',
+    sidebar: 'bg-white/90 backdrop-blur-md border-r border-gray-200',
+    avatarRing: 'ring-2 ring-gray-300 ring-offset-2',
+    btn: 'bg-white hover:bg-gray-100 text-gray-800 border border-gray-200 rounded-2xl transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md',
+    btnDownloadNoAnswer: 'bg-gray-50 hover:bg-gray-100 text-gray-800 border border-gray-200 rounded-2xl transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md',
+    btnDownloadWithAnswer: 'bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-300 rounded-2xl transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md',
+    btnDanger: 'bg-gray-50 hover:bg-red-50 text-red-500 border border-gray-200 rounded-2xl transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md',
+    sectionTitle: 'text-gray-500',
+    textMuted: 'text-gray-400',
+    userBubble: 'bg-gray-900 text-white shadow-[0_4px_12px_rgba(0,0,0,0.1)]',
+    aiBubble: 'bg-white border border-gray-200 text-gray-800 shadow-[0_4px_12px_rgba(0,0,0,0.04)]',
+    input: 'border-gray-300 focus:ring-gray-400',
+    sendBtn: 'bg-gray-900 hover:bg-black text-white shadow-[0_4px_12px_rgba(0,0,0,0.2)]',
+    themeDot: 'bg-gray-800',
+    watermark: 'text-gray-200',
+    chatBgStyle: {
+      backgroundImage: `url('/chat-bg.png')`,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+      backgroundRepeat: 'no-repeat',
+    },
+  },
+};

@@ -1,0 +1,25 @@
+.message-bubble {
+  max-width: 70%;
+  padding: 12px 16px;
+  border-radius: 20px;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+  animation: fadeInUp 0.3s ease;
+  word-break: break-word;
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.tool-btn {
+  @apply w-full py-2 px-4 bg-gradient-to-r from-yellow-200 to-pink-200 hover:from-yellow-300 hover:to-pink-300 text-purple-900 font-semibold rounded-xl shadow transition transform hover:scale-105;
+}
+
+.input-field {
+  @apply w-full px-4 py-2 border border-purple-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-400 bg-white/70;
+}
+
+.send-btn {
+  @apply px-6 py-2 bg-gradient-to-r from-purple-400 to-pink-400 text-white font-bold rounded-xl shadow hover:from-purple-500 hover:to-pink-500 transition;
+}

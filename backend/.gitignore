@@ -1,0 +1,20 @@
+# 环境变量（包含API密钥）
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Node / React
+node_modules/
+/build
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# 系统文件
+.DS_Store
+Thumbs.db
