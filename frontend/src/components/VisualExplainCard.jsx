@@ -3,7 +3,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import { BlockMath } from 'react-katex';
 import axios from 'axios';
 
-const API = axios.create({ baseURL: process.env.REACT_APP_API_URL || 'http://localhost:8000' });
+const API = axios.create({ baseURL: 'https://ai-tutor3-production.up.railway.app' });
 
 function VisualExplainCard({ imageBase64, steps }) {
   const canvasRef = useRef(null);
