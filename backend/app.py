@@ -4,6 +4,7 @@ import re
 import uuid
 import json
 import base64
+import tempfile
 from http import HTTPStatus
 from contextlib import contextmanager
 from urllib.parse import quote
@@ -12,9 +13,10 @@ import bcrypt
 import sqlite3
 import dashscope
 from dashscope import Generation, MultiModalConversation
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from dashscope.audio.tts import SpeechSynthesizer
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, FileResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -32,7 +34,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DB_PATH = '/data/ai_tutor_users.db'
+DB_PATH = os.getenv("DB_PATH", "ai_tutor_users.db")
 
 @contextmanager
 def get_db():
@@ -43,6 +45,7 @@ def get_db():
     finally:
         conn.close()
 
+# 初始化数据库表
 with get_db() as conn:
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users (
@@ -57,6 +60,20 @@ with get_db() as conn:
         content TEXT,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (username) REFERENCES users(username)
+    )''')
+    # 新增错题表
+    c.execute('''CREATE TABLE IF NOT EXISTS mistakes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT,
+        subject TEXT,
+        grade_level TEXT,
+        question TEXT,
+        wrong_answer TEXT,
+        correct_answer TEXT,
+        knowledge_point TEXT,
+        error_type TEXT,
+        reviewed INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )''')
 
 class ChatRequest(BaseModel):
@@ -79,6 +96,14 @@ class SimilarRequest(BaseModel):
     question: str
     correct_answer: str
 
+class ChatMultimodalRequest(BaseModel):
+    message: str
+    image_base64: str = None
+
+class VisualTeacherPlainRequest(BaseModel):
+    image_base64: str
+    question_text: str = ""
+
 def save_chat_message(username, role, content):
     with get_db() as conn:
         c = conn.cursor()
@@ -100,6 +125,23 @@ def clear_chat_history(username):
         c.execute("DELETE FROM chat_history WHERE username = ?", (username,))
         conn.commit()
 
+# 数据库保存错题
+def save_mistake(session_id, subject, grade_level, question, wrong_answer, correct_answer, knowledge_point, error_type):
+    with get_db() as conn:
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO mistakes (session_id, subject, grade_level, question, wrong_answer, correct_answer, knowledge_point, error_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, subject, grade_level, question, wrong_answer, correct_answer, knowledge_point, error_type)
+        )
+        conn.commit()
+
+# 从数据库获取所有错题
+def get_all_mistakes():
+    with get_db() as conn:
+        c = conn.cursor()
+        c.execute("SELECT * FROM mistakes ORDER BY created_at DESC")
+        return c.fetchall()
+
 tutor = AITutor()
 
 def call_qwen_vl(image_bytes, prompt="请提取图片中的所有题目文字，只返回文字内容。"):
@@ -114,7 +156,10 @@ def call_qwen_vl(image_bytes, prompt="请提取图片中的所有题目文字，
         }
     ]
     try:
-        response = MultiModalConversation.call(model='qwen3.6-plus', messages=messages)
+        response = MultiModalConversation.call(
+            model='qwen3.6-plus',
+            messages=messages
+        )
         if response.status_code == HTTPStatus.OK:
             return response.output.choices[0].message.content[0]["text"]
         else:
@@ -122,6 +167,19 @@ def call_qwen_vl(image_bytes, prompt="请提取图片中的所有题目文字，
     except Exception as e:
         return f"❌ 视觉模型调用失败：{str(e)}"
 
+def generate_speech_ali(text: str) -> bytes:
+    result = SpeechSynthesizer.call(
+        model='sambert-zhixiao-v1',
+        text=text,
+        sample_rate=16000,
+        format='mp3'
+    )
+    if result.get_audio_data():
+        return result.get_audio_data()
+    else:
+        raise Exception(f"TTS 失败：{result.get_response()}")
+
+# ----- API 路由 -----
 @app.post("/api/login")
 def login(req: LoginRequest):
     with get_db() as conn:
@@ -232,22 +290,39 @@ async def upload_homework(file: UploadFile = File(...)):
             return {"reply": f"❌ 内容提取失败：{text}"}
 
         result = tutor.grade_homework(subject="通用", grade_level="通用", homework_content=text)
-        if result and "mistakes" in result:
+        if result:
             score = result.get("score", 0)
-            comment = result.get("comment", "")
-            msg = f"📋 **得分**：{score} / {result.get('total_score', 100)}\n**评语**：{comment}\n\n**错题详情**：\n"
-            for i, m in enumerate(result["mistakes"], 1):
-                msg += f"{i}. {m.get('question', '')} → 正确：{m.get('correct_answer', '')}\n"
-                tutor.record_mistake(
-                    session_id=tutor.session_id,
-                    subject="通用",
-                    grade_level="通用",
-                    question=m.get("question", ""),
-                    wrong_answer=m.get("wrong_answer", ""),
-                    correct_answer=m.get("correct_answer", ""),
-                    knowledge_point=m.get("knowledge_point", ""),
-                    error_type=m.get("error_type", "未分类")
-                )
+            comment = result.get("comment", "加油！")
+            msg = f"📋 **得分**：{score} / {result.get('total_score', 100)}\n**评语**：{comment}\n\n"
+
+            mistakes_list = result.get("mistakes", [])
+            if mistakes_list:
+                msg += "**❌ 错题详情**：\n"
+                for i, m in enumerate(mistakes_list, 1):
+                    q = m.get("question", "")
+                    correct = m.get("correct_answer", "")
+                    sol = m.get("solution", "")
+                    msg += f"{i}. {q} → 正确：{correct}\n"
+                    if sol:
+                        msg += f"   **解题步骤**：{sol}\n"
+                    # 持久化错题到数据库
+                    save_mistake(
+                        session_id=tutor.session_id,
+                        subject="通用",
+                        grade_level="通用",
+                        question=q,
+                        wrong_answer=m.get("wrong_answer", ""),
+                        correct_answer=correct,
+                        knowledge_point=m.get("knowledge_point", ""),
+                        error_type=m.get("error_type", "未分类")
+                    )
+            else:
+                msg += "✅ 所有题目都正确，太棒了！\n"
+                all_sols = result.get("all_solutions", [])
+                if all_sols:
+                    msg += "\n📝 **解题过程复习**：\n"
+                    for sol in all_sols:
+                        msg += f"**题目**：{sol.get('question', '')}\n**解法**：{sol.get('solution', '')}\n\n"
             return {"reply": msg}
         else:
             return {"reply": "✅ 批改完成，未发现明显错误。"}
@@ -268,28 +343,32 @@ async def photo_search(file: UploadFile = File(...)):
     except Exception as e:
         return {"reply": f"📷 搜题失败: {str(e)}"}
 
+# 错题本 API（从数据库读取）
 @app.get("/api/mistakes")
 def get_mistakes():
     try:
-        all_mistakes = tutor.get_mistakes(tutor.session_id, reviewed=None)
+        mistakes = get_all_mistakes()
         result = []
-        for m in all_mistakes:
+        for m in mistakes:
             result.append({
-                "id": m[0],
-                "question": m[4],
-                "correct_answer": m[6],
-                "error_type": m[8],
-                "reviewed": m[-1] if len(m) > 10 else 0,
-                "created_at": ""
+                "id": m["id"],
+                "question": m["question"],
+                "correct_answer": m["correct_answer"],
+                "error_type": m["error_type"],
+                "reviewed": m["reviewed"],
+                "created_at": m["created_at"]
             })
         return {"mistakes": result}
     except Exception:
         return {"mistakes": []}
 
 @app.post("/api/mistakes/{mistake_id}/review")
-def mark_reviewed(mistake_id: str):
+def mark_reviewed(mistake_id: int):
     try:
-        tutor.mark_reviewed(mistake_id)
+        with get_db() as conn:
+            c = conn.cursor()
+            c.execute("UPDATE mistakes SET reviewed = 1 WHERE id = ?", (mistake_id,))
+            conn.commit()
         return {"success": True}
     except Exception:
         return {"success": False}
@@ -305,10 +384,96 @@ def generate_similar(req: SimilarRequest):
 @app.get("/api/report")
 def get_report():
     try:
-        report = tutor.get_weekly_report(tutor.session_id)
+        mistakes = get_all_mistakes()
+        if not mistakes:
+            return {"report": "🎉 本周没有错题，表现优秀！继续保持哦～"}
+        mistakes_text = "\n".join([f"- {m['question']}" for m in mistakes])
+        prompt = f"根据以下错题，生成一份简短的周学习报告：\n{mistakes_text}"
+        report = tutor.chat(prompt)
         return {"report": report}
     except Exception:
         return {"report": "生成报告时出错"}
+
+@app.post("/api/chat-multimodal")
+def chat_multimodal(req: ChatMultimodalRequest):
+    prompt = req.message.strip()
+    image_b64 = req.image_base64
+    if image_b64:
+        try:
+            response = MultiModalConversation.call(
+                model='qwen3.6-plus',
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"image": f"data:image/png;base64,{image_b64}"},
+                        {"text": prompt if prompt else "请描述这张图片"}
+                    ]
+                }]
+            )
+            if response.status_code == HTTPStatus.OK:
+                reply = response.output.choices[0].message.content[0]["text"]
+            else:
+                reply = f"❌ 多模态调用失败：{response.code}"
+        except Exception as e:
+            reply = f"❌ 多模态调用异常：{str(e)}"
+    else:
+        try:
+            reply = tutor.chat(prompt)
+        except Exception:
+            reply = "❌ 老师暂时不在，请稍后再试。"
+    return {"reply": reply}
+
+# 超拟人老师讲解
+@app.post("/api/visual-teacher-plain")
+async def visual_teacher_plain(req: VisualTeacherPlainRequest):
+    image_b64 = req.image_base64
+    image_bytes = base64.b64decode(image_b64)
+    ocr_text = call_qwen_vl(image_bytes, "请提取图片中的所有题目文字，只输出题目本身，不要解释。")
+    if ocr_text.startswith("❌"):
+        return {"error": f"题目提取失败：{ocr_text}"}
+
+    full_prompt = (
+        f"你是一位耐心的AI家教。这是一道题目：\n{ocr_text}\n\n"
+        "请一步一步详细讲解这道题目的解题思路和计算过程，用中文，语气亲切活泼。\n"
+        "每步讲解请包含完整的句子，至少2-3句话，详细解释这一步在做什么以及为什么这样做。\n"
+        "请严格按照以下JSON格式输出（不要输出其他内容）：\n"
+        "{\n"
+        '  "steps": [\n'
+        '    {"text": "第一步：首先我们分析题目给出的已知条件……"},\n'
+        '    {"text": "第二步：接下来我们需要应用公式……因为……所以……"},\n'
+        '    {"text": "第三步：最后我们将数值代入计算，得出最终答案……"}\n'
+        '  ]\n'
+        "}\n"
+        "确保每步的text字段包含完整的讲解段落，不仅仅是单个短语或数字。"
+    )
+    try:
+        response_text = tutor.chat(full_prompt)
+        clean = response_text.replace("```json", "").replace("```", "").strip()
+        steps_data = json.loads(clean)
+        steps = steps_data.get("steps", [])
+    except Exception as e:
+        return {"error": f"讲解生成失败：{str(e)}"}
+
+    return {"steps": steps}
+
+# 逐句 TTS 端点
+@app.post("/api/tts")
+async def tts(text: str = Form(...)):
+    try:
+        audio_bytes = generate_speech_ali(text)
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+        tmp.write(audio_bytes)
+        tmp.close()
+        return {"url": f"http://127.0.0.1:8000/api/tts-audio?file={os.path.basename(tmp.name)}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/tts-audio")
+async def tts_audio(file: str):
+    path = os.path.join(tempfile.gettempdir(), file)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="音频文件不存在")
+    return FileResponse(path, media_type="audio/mpeg")
 
 if __name__ == "__main__":
     import uvicorn

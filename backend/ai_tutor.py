@@ -14,10 +14,8 @@ class AITutor:
     def __init__(self):
         self.session_id = str(uuid.uuid4())
         self.current_worksheet = None
-        self.mistakes = []
-        self.chat_history = []   # 最多保留200条消息（100轮对话）
+        self.chat_history = []   # 最多保留200条消息
 
-    # ---------- 通用调用 ----------
     def _call_qwen(self, messages, temperature=0.7, max_tokens=1000):
         response = Generation.call(
             model='qwen-turbo',
@@ -31,7 +29,6 @@ class AITutor:
         else:
             return f"❌ AI 调用失败：{response.code} - {response.message}"
 
-    # ---------- 普通对话（带记忆） ----------
     def chat(self, prompt):
         system_prompt = {
             "role": "system",
@@ -39,10 +36,10 @@ class AITutor:
                 "你是一个耐心、有趣的AI家教，专门给中小学生辅导功课。"
                 "用中文回答，语气亲切温暖。\n"
                 "【重要规则】\n"
-                "1. 如果学生发送的是一道题目（例如算式、应用题等），你要先鼓励学生自己尝试思考，可以给予启发或提示，但不要直接给出答案。"
-                "只有当学生明确表达‘不会’、‘请解答’、‘答案是什么’等请求时，你才可以给出答案。\n"
-                "2. 你绝对不能主动给学生出题，即使学生已经答对了当前题目，也不可以主动询问‘要不要再来一题’。"
-                "只有当学生明确要求‘再出一道题’或‘来点练习’时，你才可以出新题。"
+                "1. 如果学生直接发送了一道题目，你先提供解题思路或启发，不直接给答案。"
+                "只有学生明确求助时才给出答案。\n"
+                "2. 如果学生上一个问题不需要你给出答案，你就可以主动出题。\n"
+                "3. 当学生明确要求再来一题、出个题等，直接出一道新题，若给了题材则直接生成该题材题目，不反问。"
             )
         }
 
@@ -60,7 +57,6 @@ class AITutor:
 
         return reply
 
-    # ---------- 生成作业 ----------
     def generate_worksheet(self, topic, difficulty, num, grade=None):
         grade_text = f"，年级：{grade}" if grade else ""
         prompt = (
@@ -92,24 +88,22 @@ class AITutor:
             "answers": answers
         }
 
-    # ---------- 批改作业 ----------
     def grade_homework(self, subject, grade_level, homework_content):
         prompt = (
-            f"请严格批改以下学生提交的作业内容，不要添加任何额外题目。科目：{subject}，年级：{grade_level}。\n"
-            f"学生作业：\n{homework_content}\n"
+            f"请批改以下学生作业（科目：{subject}，年级：{grade_level}）：\n{homework_content}\n"
             "要求：\n"
-            "1. 只批改学生实际提交的题目，不得自行生成新题。\n"
-            "2. 生成一个JSON，包含：score（分数，0-100分，根据错误题数占总题数的比例扣分，满分100）、total_score（固定为100）、comment（简短有趣的评语）。\n"
-            "3. mistakes数组：只包含学生做错的题目。每项包含question（原题）、wrong_answer（学生错误答案）、correct_answer（正确答案）、knowledge_point（知识点）、error_type（计算错误/概念错误等）。如果某题学生答对了，不要放进mistakes。\n"
-            "4. 如果所有题都正确，mistakes为空数组，score为100。\n"
-            "只输出JSON，不要任何解释。"
+            "1. 题目保留学生提交的原完整文字，不要缩写也不要使用“题目1”等占位符。\n"
+            "2. 用热情鼓励的语气写评语。\n"
+            "3. 返回JSON，包含字段：score、total_score、comment、mistakes（数组，每项含question、wrong_answer、correct_answer、knowledge_point、error_type、solution）、all_solutions。\n"
+            "4. solution字段请用分步列出，每步用换行分隔，不要用“1. 2.”这类序号，由系统统一格式化。\n"
+            "只输出JSON。"
         )
         messages = [
-            {"role": "system", "content": "你是一个严谨的批改助手，严格按JSON格式输出，只收录错题。"},
+            {"role": "system", "content": "你是一位温柔又专业的批改老师，擅长鼓励学生，并输出清晰的解题步骤。题目标题必须保留原始完整文字。"},
             {"role": "user", "content": prompt}
         ]
         try:
-            raw = self._call_qwen(messages, temperature=0.3)
+            raw = self._call_qwen(messages, temperature=0.5, max_tokens=2000)
             raw = raw.replace("```json", "").replace("```", "").strip()
             result = json.loads(raw)
             if result.get("total_score", 0) == 0:
@@ -119,74 +113,39 @@ class AITutor:
             return {
                 "score": 0,
                 "total_score": 100,
-                "comment": "批改解析失败，请重试。",
-                "mistakes": []
+                "comment": "你真的很认真！不过批改解析出了点小问题，我们再试一次吧～",
+                "mistakes": [],
+                "all_solutions": []
             }
 
-    # ---------- 生成相似题（彻底修复：只出题目，不带答案） ----------
     def generate_similar_question(self, question, correct_answer):
-        # 1. 从原题中提取基础题目（去掉等号和错误答案，如 "1+1=3" -> "1+1"）
         base_question = question.strip()
-        # 尝试移除等号及后面的任何内容
         if "=" in base_question:
             base_question = base_question.split("=")[0].strip()
 
         prompt = (
-            f"请根据以下题目生成一道同类型的题目，只输出题目本身，以“ = ?”结尾，不要输出答案。\n"
+            f"请根据以下题目生成一道同类型的题目，要求改变场景、数字、结构或解题思路，而不仅仅是替换数值。\n"
             f"原题：{base_question}\n"
-            f"相似题："
+            f"正确答案：{correct_answer}\n"
+            f"新题目（只输出题目本身，不要答案，不要加“= ?”等额外标记，直接写题目）："
         )
         messages = [
-            {
-                "role": "system",
-                "content": (
-                    "你是一个出题助手。你根据给定的题目生成一道类似但不同数字的题目。"
-                    "要求：1. 只输出题目本身，比如“3 + 5 = ?”。2. 不要输出答案。3. 不要输出任何解释。"
-                )
-            },
+            {"role": "system", "content": "你是一个出题助手。你只生成题目文字，严禁输出答案、解析、或任何额外文字。题目末尾不要加“= ?”之类的标记。"},
             {"role": "user", "content": prompt}
         ]
-        result = self._call_qwen(messages, temperature=0.8)
 
-        # 2. 后处理：进一步去除可能泄露的答案
-        # 删除类似“正确答案：xxx”的行
-        result = re.sub(r'\n?正确答案[：:].*', '', result, flags=re.IGNORECASE)
-        result = re.sub(r'\n?答案[：:].*', '', result, flags=re.IGNORECASE)
-        # 如果结尾是“= 数字”，去掉数字，改为“= ?”
-        result = re.sub(r'=\s*\d+\.?\s*$', '= ?', result.strip())
-        # 确保结尾有“= ?”
-        if not result.endswith('= ?'):
-            result = result.rstrip() + ' = ?'
-        return result.strip()
+        for attempt in range(3):
+            result = self._call_qwen(messages, temperature=0.9 + attempt * 0.1, max_tokens=200)
+            result = re.sub(r'\n?正确答案[：:].*', '', result, flags=re.IGNORECASE)
+            result = re.sub(r'\n?答案[：:].*', '', result, flags=re.IGNORECASE)
+            result = re.sub(r'\s*=\s*\??$', '', result)
+            result = result.strip().rstrip('。').rstrip('.')
+            if len(result) > 3 and re.search(r'[0-9\u4e00-\u9fff]', result):
+                if not result.endswith('?') and not result.endswith('？'):
+                    result += '？'
+                return result
 
-    # ---------- 错题管理 ----------
-    def record_mistake(self, session_id, subject, grade_level, question, wrong_answer, correct_answer, knowledge_point, error_type):
-        mistake_id = str(uuid.uuid4())[:8]
-        self.mistakes.append([mistake_id, session_id, subject, grade_level, question, wrong_answer, correct_answer, knowledge_point, error_type, 0])
-
-    def get_mistakes(self, session_id, reviewed=None):
-        if reviewed is not None:
-            return [m for m in self.mistakes if m[-1] == reviewed]
-        return self.mistakes
-
-    def mark_reviewed(self, mistake_id):
-        for m in self.mistakes:
-            if m[0] == mistake_id:
-                m[-1] = 1
-                return True
-        return False
-
-    def get_weekly_report(self, session_id):
-        if not self.mistakes:
-            return "本周没有错题，表现优秀！"
-        mistakes_text = "\n".join([f"- {m[4]}" for m in self.mistakes])
-        prompt = f"根据以下错题，生成一份简短的周学习报告，指出薄弱知识点并给出鼓励：\n{mistakes_text}"
-        messages = [
-            {"role": "system", "content": "你是一个贴心的学习报告生成助手，用温暖的中文写报告，200字以内。"},
-            {"role": "user", "content": prompt}
-        ]
-        return self._call_qwen(messages, max_tokens=500)
+        return f"类似：{base_question}？"
 
     def clear_memory(self):
-        self.mistakes = []
         self.chat_history = []

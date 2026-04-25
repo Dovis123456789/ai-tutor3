@@ -1,28 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import React from 'react';
 
-const API = axios.create({ baseURL: 'http://localhost:8000' });
-
-export default function ReportModal({ theme, onClose }) {
-    const [report, setReport] = useState('');
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-        fetchReport();
-    }, []);
-
-    const fetchReport = async () => {
-        setLoading(true);
-        try {
-            const res = await API.get('/api/report');
-            setReport(res.data.report);
-        } catch (err) {
-            setReport('生成失败，请稍后重试');
-        } finally {
-            setLoading(false);
-        }
-    };
-
+export default function ReportModal({ report, theme, onClose }) {
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={onClose}>
             <div
@@ -33,14 +11,9 @@ export default function ReportModal({ theme, onClose }) {
                     <h2 className="text-2xl font-bold text-gray-800">📊 学习周报</h2>
                     <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl">✕</button>
                 </div>
-
-                {loading ? (
-                    <div className="text-center py-10 text-gray-400">生成中...</div>
-                ) : (
-                    <div className="prose max-w-none whitespace-pre-wrap text-gray-700">
-                        {report}
-                    </div>
-                )}
+                <div className="prose max-w-none whitespace-pre-wrap text-gray-700 text-[15px] leading-relaxed">
+                    {report || '生成中...'}
+                </div>
             </div>
         </div>
     );

@@ -7,6 +7,7 @@ export default function MistakeBookModal({ theme, onClose, onSendToChat }) {
     const [mistakes, setMistakes] = useState([]);
     const [loading, setLoading] = useState(true);
     const [generatedMap, setGeneratedMap] = useState({});
+    const [reviewingId, setReviewingId] = useState(null); // 正在标记复习的题目ID
 
     useEffect(() => { loadMistakes(); }, []);
 
@@ -14,13 +15,25 @@ export default function MistakeBookModal({ theme, onClose, onSendToChat }) {
         setLoading(true);
         try {
             const res = await API.get('/api/mistakes');
-            setMistakes(res.data.mistakes || []);
+            // 只显示未复习的错题
+            const unreviewed = (res.data.mistakes || []).filter(m => m.reviewed !== 1);
+            setMistakes(unreviewed);
         } catch { setMistakes([]); }
         finally { setLoading(false); }
     };
 
     const handleReview = async (id) => {
-        try { await API.post(`/api/mistakes/${id}/review`); loadMistakes(); } catch { alert('标记失败'); }
+        if (reviewingId) return; // 防止重复点击
+        setReviewingId(id);
+        try {
+            await API.post(`/api/mistakes/${id}/review`);
+            // 标记成功后，直接从本地列表中移除
+            setMistakes(prev => prev.filter(m => m.id !== id));
+        } catch (err) {
+            alert('标记失败，请重试');
+        } finally {
+            setReviewingId(null);
+        }
     };
 
     const handleGenerateSimilar = async (mistake) => {
@@ -57,7 +70,7 @@ export default function MistakeBookModal({ theme, onClose, onSendToChat }) {
                 {loading ? (
                     <div className="text-center py-10 text-gray-400">加载中...</div>
                 ) : mistakes.length === 0 ? (
-                    <div className="text-center py-10 text-gray-400">✨ 暂无错题，继续加油！</div>
+                    <div className="text-center py-10 text-gray-400">✨ 暂无未复习的错题，继续加油！</div>
                 ) : (
                     <div className="space-y-6">
                         {mistakes.map((m) => (
@@ -67,17 +80,16 @@ export default function MistakeBookModal({ theme, onClose, onSendToChat }) {
                                         <p className="font-semibold text-gray-700">📝 题目：{m.question}</p>
                                         <p className="text-sm text-green-600 mt-1">✔ 正确答案：{m.correct_answer}</p>
                                         <p className="text-sm text-gray-500 mt-1">🏷 错误类型：{m.error_type || '未分类'}</p>
-                                        {/* 不显示 reviewd 数字，改为状态标签 */}
-                                        {m.reviewed === 1 ? (
-                                            <span className="inline-block mt-2 text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded-full">已复习</span>
-                                        ) : (
-                                            <span className="inline-block mt-2 text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">未复习</span>
-                                        )}
+                                        <span className="inline-block mt-2 text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">未复习</span>
                                     </div>
                                     <div className="flex gap-2">
-                                        {m.reviewed !== 1 && (
-                                            <button onClick={() => handleReview(m.id)} className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs hover:bg-green-200 transition">✅ 已复习</button>
-                                        )}
+                                        <button
+                                            onClick={() => handleReview(m.id)}
+                                            disabled={reviewingId === m.id}
+                                            className={`px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs hover:bg-green-200 transition ${reviewingId === m.id ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                        >
+                                            {reviewingId === m.id ? '标记中...' : '✅ 已复习'}
+                                        </button>
                                         <button onClick={() => handleGenerateSimilar(m)} className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs hover:bg-purple-200 transition">🎯 生成相似题</button>
                                     </div>
                                 </div>
