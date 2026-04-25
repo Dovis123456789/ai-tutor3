@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
-const API = axios.create({ baseURL: process.env.REACT_APP_API_URL || 'http://localhost:8000' });
+const API = axios.create({ baseURL: 'https://ai-tutor3-production.up.railway.app' });
 
 export default function MistakeBookModal({ theme, onClose, onSendToChat }) {
     const [mistakes, setMistakes] = useState([]);

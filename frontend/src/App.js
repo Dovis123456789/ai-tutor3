@@ -10,7 +10,7 @@ import ReportModal from './components/ReportModal';
 import axios from 'axios';
 import { themes } from './themeConfig';
 
-const API = axios.create({ baseURL: process.env.REACT_APP_API_URL || 'http://localhost:8000' });
+const API = axios.create({ baseURL: 'https://ai-tutor3-production.up.railway.app' });
 
 function App() {
   const [loggedIn, setLoggedIn] = useState(false);
