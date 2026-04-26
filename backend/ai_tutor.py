@@ -7,8 +7,6 @@ import dashscope
 from dashscope import Generation
 from dotenv import load_dotenv
 
-load_dotenv()
-dashscope.api_key = os.getenv("DASHSCOPE_API_KEY")
 
 class AITutor:
     def __init__(self):
