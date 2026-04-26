@@ -16,7 +16,11 @@ class AITutor:
 
     def _call_qwen(self, messages, temperature=0.7, max_tokens=1000):
         import os
-        dashscope.api_key = os.getenv("DASHSCOPE_API_KEY")  # 每次调用前确保 API Key 正确
+        api_key = os.environ.get("DASHSCOPE_API_KEY")
+        if not api_key:
+            return "❌ 环境变量 DASHSCOPE_API_KEY 未设置"
+        dashscope.api_key = api_key
+        
         response = Generation.call(
             model='qwen-turbo',
             messages=messages,
