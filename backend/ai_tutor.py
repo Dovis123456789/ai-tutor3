@@ -17,6 +17,8 @@ class AITutor:
         self.chat_history = []   # 最多保留200条消息
 
     def _call_qwen(self, messages, temperature=0.7, max_tokens=1000):
+        import os
+        dashscope.api_key = os.getenv("DASHSCOPE_API_KEY")  # 每次调用前确保 API Key 正确
         response = Generation.call(
             model='qwen-turbo',
             messages=messages,
@@ -28,34 +30,16 @@ class AITutor:
             return response.output.choices[0].message.content.strip()
         else:
             return f"❌ AI 调用失败：{response.code} - {response.message}"
-
+            
     def chat(self, prompt):
-        system_prompt = {
-            "role": "system",
-            "content": (
-                "你是一个耐心、有趣的AI家教，专门给中小学生辅导功课。"
-                "用中文回答，语气亲切温暖。\n"
-                "【重要规则】\n"
-                "1. 如果学生直接发送了一道题目，你先提供解题思路或启发，不直接给答案。"
-                "只有学生明确求助时才给出答案。\n"
-                "2. 如果学生上一个问题不需要你给出答案，你就可以主动出题。\n"
-                "3. 当学生明确要求再来一题、出个题等，直接出一道新题，若给了题材则直接生成该题材题目，不反问。"
-            )
-        }
-
-        messages = [system_prompt]
-        recent_history = self.chat_history[-200:]
-        messages.extend(recent_history)
-        messages.append({"role": "user", "content": prompt})
-
-        reply = self._call_qwen(messages, temperature=0.7)
-
-        self.chat_history.append({"role": "user", "content": prompt})
-        self.chat_history.append({"role": "assistant", "content": reply})
-        if len(self.chat_history) > 200:
-            self.chat_history = self.chat_history[-200:]
-
-        return reply
+        try:
+            messages = [
+                {"role": "system", "content": "你是一个耐心、有趣的AI家教。"},
+                {"role": "user", "content": prompt}
+            ]
+            return self._call_qwen(messages, temperature=0.7)
+        except Exception as e:
+            return f"AI调用失败：{str(e)}"
 
     def generate_worksheet(self, topic, difficulty, num, grade=None):
         grade_text = f"，年级：{grade}" if grade else ""

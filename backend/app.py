@@ -247,8 +247,10 @@ def chat(req: ChatRequest):
     else:
         try:
             reply = tutor.chat(prompt)
-        except Exception:
-            reply = "❌ 老师暂时不在，请稍后再试。"
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return {"reply": f"❌ 老师暂时不在，请稍后再试。错误：{str(e)}", "worksheet_ready": False}
     return {"reply": reply, "worksheet_ready": False}
 
 @app.get("/api/download-worksheet")
